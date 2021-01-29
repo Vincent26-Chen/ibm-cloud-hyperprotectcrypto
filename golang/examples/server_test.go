@@ -13,26 +13,100 @@ import (
 	"crypto/tls"
 	"encoding/asn1"
 	"fmt"
+	"os"
 	"reflect"
+	"testing"
 
 	"github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/ep11"
 	pb "github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/grpc"
 	"github.com/ibm-developer/ibm-cloud-hyperprotectcrypto/golang/util"
 	uuid "github.com/satori/go.uuid"
+	"github.com/sirupsen/logrus"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
 // The following IBM Cloud items need to be changed prior to running the sample program
-const address = "<grep11_server_address>:<port>"
+var address = "<grep11_server_address>:<port>"
 
 var callOpts = []grpc.DialOption{
-	grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
-	grpc.WithPerRPCCredentials(&util.IAMPerRPCCredentials{
-		APIKey:   "<ibm_cloud_apikey>",
-		Endpoint: "<https://<iam_ibm_cloud_endpoint>",
-		Instance: "<hpcs_instance_id>",
-	}),
+	// grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
+	// grpc.WithPerRPCCredentials(&util.IAMPerRPCCredentials{
+	// 	APIKey:   "<ibm_cloud_apikey>",
+	// 	Endpoint: "https://iam.test.cloud.ibm.com",
+	// 	Instance: "<hpcs_instance_id>",
+	// }),
+}
+
+var (
+	logger = MustGetLogger("Test")
+)
+
+func MustGetLogger(module string) *logrus.Entry {
+	newLogger := logrus.New()
+	logger := newLogger.WithFields(logrus.Fields{
+		"module": module,
+	})
+
+	logger.Logger.Formatter = &logrus.TextFormatter{
+		TimestampFormat: "2006-01-02 15:04:05.000",
+		FullTimestamp:   true,
+		ForceColors:     true,
+	}
+
+	logger.Logger.SetLevel(logrus.TraceLevel)
+	return logger
+}
+
+// TestMain set callOpts and address
+func TestMain(m *testing.M) {
+
+	serverAddr, ok := os.LookupEnv("GREP11_SERVER_ADDRESS")
+	if !ok {
+		logger.Infof("No GREP11_SERVER_ADDRESS defined, use localhost")
+		serverAddr = "localhost"
+	}
+
+	serverPort, ok := os.LookupEnv("GREP11_SERVER_PORT")
+	if !ok {
+		logger.Infof("No GREP11_SERVER_PORT defined, use 54321")
+		serverPort = "54321"
+	}
+	address = serverAddr + ":" + serverPort
+	logger.Infof("address is %s", address)
+
+	enableTLS, ok := os.LookupEnv("GREP11_ENABLE_TLS")
+	if ok && enableTLS == "yes" {
+		callOpts = append(callOpts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+		logger.Infof("TLS enabled")
+	} else {
+		logger.Infof("TLS disabled")
+	}
+
+	instance, ok1 := os.LookupEnv("GREP11_INSTANCE_ID")
+	APIKey, ok2 := os.LookupEnv("PKCS11_USER_PIN")
+	if !ok1 {
+		logger.Infof("No GREP11_INSTANCE_ID defined, use no per RPC call options")
+	}
+	if !ok2 {
+		logger.Infof("No PKCS11_USER_PIN defined, use no per RPC call options")
+	}
+	if ok1 && ok2 {
+		callOpts = append(callOpts, grpc.WithPerRPCCredentials(&util.IAMPerRPCCredentials{
+			APIKey:   APIKey,
+			Endpoint: "https://iam.test.cloud.ibm.com",
+			Instance: instance,
+		}))
+		logger.Infof("Call options: %+v", callOpts)
+	}
+	if len(callOpts) == 0 {
+		callOpts = append(callOpts, grpc.WithInsecure())
+	}
+
+	ret := m.Run()
+	if ret != 0 {
+		logger.Errorf("Failed testing: %d", ret)
+	}
 }
 
 // Example_getMechanismInfo retrieves a mechanism list and retrieves detailed information for the CKM_RSA_PKCS mechanism
